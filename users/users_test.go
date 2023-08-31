@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 
 	_ "github.com/lib/pq"
@@ -112,4 +113,83 @@ func testUserStore_Find(us *UserStore) func(t *testing.T) {
 			})
 		}
 	}
+}
+
+type unsafeUserStore struct {
+	*UserStore
+	wg *sync.WaitGroup
+}
+
+func (unsafe *unsafeUserStore) Find(id int) (*User, error) {
+	user, err := unsafe.UserStore.Find(id)
+	if err != nil {
+		return nil, err
+	}
+	unsafe.wg.Done()
+	unsafe.wg.Wait()
+	return user, err
+}
+
+func TestSpend(t *testing.T) {
+	db, err := sql.Open("postgres",
+		"host=localhost port=5432 user=simon sslmode=disable dbname=test_user_store")
+	if err != nil {
+		panic(fmt.Errorf("sql.Open() err = %s", err))
+	}
+	defer db.Close()
+
+	us := &UserStore{
+		sql: db,
+	}
+
+	simon := &User{
+		Name:    "Simon",
+		Email:   "simon@test.com",
+		Balance: 100,
+	}
+	err = us.Create(simon)
+	if err != nil {
+		t.Errorf("us.Create() err = %s", err)
+	}
+	defer func() {
+		err := us.Delete(simon.ID)
+		if err != nil {
+			t.Errorf("us.Delete() err = %s", err)
+		}
+	}()
+
+	unsafe := &unsafeUserStore{
+		UserStore: us,
+		wg:        &sync.WaitGroup{},
+	}
+	unsafe.wg.Add(2)
+	var spendWg sync.WaitGroup
+	// done := make(chan bool)
+	for i := 0; i < 2; i++ {
+		spendWg.Add(1)
+		go func() {
+			err := Spend(unsafe, simon.ID, 20)
+			if err != nil {
+				panic(fmt.Errorf("Spend() err = %s", err))
+			}
+			spendWg.Done()
+			// done <- true
+		}()
+	}
+	// Wait until both goroutines testing the Spend() function
+	// are done before testing the outcome. This could also
+	// be done using a channel (commented out above).
+	spendWg.Wait()
+	// Wait until two values have been received from the done channel
+	// before moving on.
+	// <-done
+	// <-done
+	got, err := us.Find(simon.ID)
+	if err != nil {
+		t.Fatalf("us.Find() err = %s", err)
+	}
+	if got.Balance != 60 {
+		t.Fatalf("user.Balance = %d; want %d", got.Balance, 60)
+	}
+
 }
