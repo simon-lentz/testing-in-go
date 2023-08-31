@@ -1,0 +1,82 @@
+It's common for tests to use similar setup or checks,
+in essence, using similar functionality. There are coding
+patterns and built-in Go functionality that help to
+facilitate the efficient and effective creation of tests
+in this category. 
+
+To this end, a commonly seen pattern is table driven tests. 
+In Go, the syntax of table driven testing often follows
+the assignment of a slice of anonymous structs to a test cases
+variable:
+
+testCases := []struct{
+    arg string
+    want string
+}{
+    {"firstArg", "firstWant"},
+    {"secondArg", "secondWant"},
+    {"thirdArg", "thirdWant"},
+}
+
+Each table test in the testCases variable is ranged
+over:
+
+for _, tt := range testCases {
+    got := TestFunc(tt.arg)
+    if got != tt.want {
+        t.Errorf("TestFunc(%q) = %q; want %q", arg, got, want)
+    }
+}
+
+VSCode has tooling to generate table-tests, see comment
+above the Camel() function in underscore.go, this saves
+us from a bit of boilerplate.
+
+The t.Run() method on the *testing.T type allows for tests
+to be run as subtests of a larger testing process:
+
+t.Run(tt.name, func(t *testing.T){
+    // closure
+})
+
+alternatively:
+
+func subtestOne(t *testing.T){
+    // subtest
+}
+t.Run(tt.name, subTestOne)
+
+Sometimes, it is more useful to do setup and teardown in a 
+separately defined function that returns a closure:
+
+func appTest(app *App) func(t *testing.T) {
+    return func(t *testing.T) {
+        // testing using app object
+    }
+}
+t.Run(tt.name, appTest(app))
+
+There are a few syntactic deviations in the wild that are
+common enough to warrant mention, though they all achieve
+the same ultimate pattern:
+
+tests := map[string]struct{
+    args args
+    want string
+}{
+    "subtest_name": {args, want},
+    //...
+}
+
+for name, tt := range tests {
+    t.Run(name, func(t *testing.T) {
+        //...
+    })
+}
+
+A major benefit to running test cases as subtests, as with 
+the t.Run() method, is additional logic in calls to t.Fatalf()
+or t.Errorf() based on the test outcome. Terminating
+a subtest with the Fatalf() method does not terminate the parent
+testing process. This same granular control over subtests confers
+additional benefits, like running certain subtests in parallel. 
