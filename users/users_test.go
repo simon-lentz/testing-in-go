@@ -1,55 +1,66 @@
-package main
+package users
 
 import (
 	"database/sql"
+	"fmt"
+	"os"
 	"reflect"
 	"testing"
 
 	_ "github.com/lib/pq"
 )
 
-func TestUserStore(t *testing.T) {
+func TestMain(m *testing.M) {
+	// Can do flag.Parse() if needed.
+	exitCode := run(m)
+	os.Exit(exitCode)
+}
+
+func run(m *testing.M) int {
 	const (
-		createDB        = `CREATE DATABASE test_user_store;`
-		dropDB          = `DROP DATABASE IF EXISTS test_user_store;`
-		createUserTable = `CREATE TABLE users (
-			id SERIAL PRIMARY KEY,
-			name TEXT,
-			email TEXT UNIQUE NOT NULL,
-		);`
+		createDB = `CREATE DATABASE test_user_store;`
+		dropDB   = `DROP DATABASE IF EXISTS test_user_store;`
 	)
 	psql, err := sql.Open("postgres",
 		"host=localhost port=5432 user=simon sslmode=disable")
 	if err != nil {
-		t.Fatalf("sql.Open() err = %s", err)
+		panic(fmt.Errorf("sql.Open() err = %s", err))
 	}
 	defer psql.Close()
 
 	_, err = psql.Exec(dropDB)
 	if err != nil {
-		t.Fatalf("psql.Exec() err = %s", err)
+		panic(fmt.Errorf("psql.Exec() err = %s", err))
 	}
 	_, err = psql.Exec(createDB)
 	if err != nil {
-		t.Fatalf("psql.Exec() err = %s", err)
+		panic(fmt.Errorf("psql.Exec() err = %s", err))
 	}
 	defer func() {
 		// teardown
 		_, err = psql.Exec(dropDB)
 		if err != nil {
-			t.Fatalf("psql.Exec() err = %s", err)
+			panic(fmt.Errorf("psql.Exec() err = %s", err))
 		}
 	}()
 
+	return m.Run()
+}
+func TestUserStore(t *testing.T) {
+	const createUserTable = `CREATE TABLE users (
+		id SERIAL PRIMARY KEY,
+		name TEXT,
+		email TEXT UNIQUE NOT NULL,
+	);`
 	db, err := sql.Open("postgres",
 		"host=localhost port=5432 user=simon sslmode=disable dbname=test_user_store")
 	if err != nil {
-		t.Fatalf("sql.Open() err = %s", err)
+		panic(fmt.Errorf("sql.Open() err = %s", err))
 	}
 	defer db.Close()
 	_, err = db.Exec(createUserTable)
 	if err != nil {
-		t.Fatalf("db.Exec() err = %s", err)
+		panic(fmt.Errorf("db.Exec() err = %s", err))
 	}
 
 	us := &UserStore{

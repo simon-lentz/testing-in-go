@@ -1,4 +1,4 @@
-module github.com/simon-lentz/testing-in-go/users
+module github.com/simon-lentz/testing-in-go
 
 go 1.21.0
 
