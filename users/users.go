@@ -19,17 +19,51 @@ type User struct {
 	Balance int
 }
 
-// UserStore is used to interact with the user store.
-type UserStore struct {
+type UserStore interface {
+	Tx(func(UserStore) error) error
+	Find(id int) (*User, error)
+	Create(user *User) error
+	Update(user *User) error
+	Delete(id int) error
+}
+
+// PsqlUserStore is used to interact with the user store.
+type PsqlUserStore struct {
+	tx interface {
+		Begin() (*sql.Tx, error)
+	}
 	sql interface {
 		Exec(query string, args ...interface{}) (sql.Result, error)
 		QueryRow(query string, args ...interface{}) *sql.Row
 	}
 }
 
+// implements the transaction method for the UserStore interface
+func (us *PsqlUserStore) Tx(fn func(us UserStore) error) error {
+	tx, err := us.tx.Begin()
+	if err != nil {
+		_ = tx.Rollback()
+		return errors.Wrap(err, "race: failed to begin transaction")
+	}
+	txStore := &PsqlUserStore{
+		// using specific transaction rather than database connection
+		sql: tx,
+	}
+	err = fn(txStore)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	err = tx.Commit()
+	if err != nil {
+		return errors.Wrap(err, "race: failed to commit transaction")
+	}
+	return nil
+}
+
 // Find will retrieve a user via a user id,
 // returning either a user, ErrNotFound, or a wrapped error.
-func (us *UserStore) Find(id int) (*User, error) {
+func (us *PsqlUserStore) Find(id int) (*User, error) {
 	const query = `SELECT id, name, email, balance FROM users WHERE id=$1;`
 	row := us.sql.QueryRow(query, id)
 	var user User
@@ -47,7 +81,7 @@ func (us *UserStore) Find(id int) (*User, error) {
 // Create will create a new user in the db and
 // update the user row with the returned id, or
 // return a wrapped error.
-func (us *UserStore) Create(user *User) error {
+func (us *PsqlUserStore) Create(user *User) error {
 	const query = `INSERT INTO users (name, email, balance) VALUES ($1, $2, $3) RETURNING id;`
 	err := us.sql.QueryRow(query, user.Name, user.Email).Scan(&user.ID)
 	if err != nil {
@@ -57,7 +91,7 @@ func (us *UserStore) Create(user *User) error {
 }
 
 // Update will update a user in the DB.
-func (us *UserStore) Update(user *User) error {
+func (us *PsqlUserStore) Update(user *User) error {
 	const query = `UPDATE users SET name=$2 email=$3 balance=$4 WHERE id=$1;`
 	_, err := us.sql.Exec(query, user.ID, user.Name, user.Email, user.Balance)
 	if err != nil {
@@ -68,7 +102,7 @@ func (us *UserStore) Update(user *User) error {
 
 // Delete removes a user from the database,
 // or returns a wrapped error.
-func (us *UserStore) Delete(id int) error {
+func (us *PsqlUserStore) Delete(id int) error {
 	const query = `DELETE FROM users WHERE id=$1;`
 	_, err := us.sql.Exec(query, id)
 	if err != nil {
@@ -77,14 +111,17 @@ func (us *UserStore) Delete(id int) error {
 	return nil
 }
 
-func Spend(us interface {
-	Find(int) (*User, error)
-	Update(*User) error
-}, userID int, amount int) error {
-	user, err := us.Find(userID)
-	if err != nil {
-		return err
-	}
-	user.Balance -= amount
-	return us.Update(user)
+type Transaction interface {
+	Tx(func(UserStore) error) error
+}
+
+func Spend(tx Transaction, userID int, amount int) error {
+	return tx.Tx(func(us UserStore) error {
+		user, err := us.Find(userID)
+		if err != nil {
+			return err
+		}
+		user.Balance -= amount
+		return us.Update(user)
+	})
 }

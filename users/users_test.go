@@ -64,7 +64,7 @@ func TestUserStore(t *testing.T) {
 		panic(fmt.Errorf("db.Exec() err = %s", err))
 	}
 
-	us := &UserStore{
+	us := &PsqlUserStore{
 		sql: db,
 	}
 
@@ -75,7 +75,7 @@ func TestUserStore(t *testing.T) {
 	*/
 }
 
-func testUserStore_Find(us *UserStore) func(t *testing.T) {
+func testUserStore_Find(us *PsqlUserStore) func(t *testing.T) {
 	return func(t *testing.T) {
 		simon := &User{
 			Name:  "Simon",
@@ -115,18 +115,18 @@ func testUserStore_Find(us *UserStore) func(t *testing.T) {
 	}
 }
 
-type unsafeUserStore struct {
-	*UserStore
+type safeUserStore struct {
+	UserStore
 	wg *sync.WaitGroup
 }
 
-func (unsafe *unsafeUserStore) Find(id int) (*User, error) {
-	user, err := unsafe.UserStore.Find(id)
+func (safe *safeUserStore) Find(id int) (*User, error) {
+	user, err := safe.UserStore.Find(id)
 	if err != nil {
 		return nil, err
 	}
-	unsafe.wg.Done()
-	unsafe.wg.Wait()
+	safe.wg.Done()
+	safe.wg.Wait()
 	return user, err
 }
 
@@ -138,7 +138,8 @@ func TestSpend(t *testing.T) {
 	}
 	defer db.Close()
 
-	us := &UserStore{
+	us := &PsqlUserStore{
+		tx:  db,
 		sql: db,
 	}
 
@@ -158,17 +159,17 @@ func TestSpend(t *testing.T) {
 		}
 	}()
 
-	unsafe := &unsafeUserStore{
+	safe := &safeUserStore{
 		UserStore: us,
 		wg:        &sync.WaitGroup{},
 	}
-	unsafe.wg.Add(2)
+	safe.wg.Add(2)
 	var spendWg sync.WaitGroup
 	// done := make(chan bool)
 	for i := 0; i < 2; i++ {
 		spendWg.Add(1)
 		go func() {
-			err := Spend(unsafe, simon.ID, 20)
+			err := Spend(safe, simon.ID, 20)
 			if err != nil {
 				panic(fmt.Errorf("Spend() err = %s", err))
 			}
